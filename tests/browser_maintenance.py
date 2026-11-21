@@ -31,7 +31,7 @@ def run(output):
         client.csrf = session["csrf"]
         _, snapshot, _ = client.request("/api/state")
         first_section, second_section = snapshot["sections"][:2]
-        client.request("/api/documents", "POST", {"section_id": first_section["id"], "owner_id": 1, "name": "旧名称.txt", "content": base64.b64encode(b"test-file").decode()})
+        _, uploaded_file, _ = client.request("/api/documents", "POST", {"section_id": first_section["id"], "owner_id": 1, "name": "旧名称.txt", "content": base64.b64encode(b"test-file").decode()})
         checks, errors = [], []
         try:
             with sync_playwright() as playwright:
@@ -91,7 +91,10 @@ def run(output):
                 page.get_by_role("button", name="编辑文件", exact=True).click()
                 page.locator('[name="name"]').fill("新名称.txt")
                 page.locator('[name="section_id"]').select_option(str(second_section["id"]))
-                page.get_by_role("button", name="保存修改", exact=True).click()
+                with page.expect_response(lambda response: response.url == f"{url}/api/documents/{uploaded_file['id']}" and response.request.method == "PATCH") as saved_file:
+                    page.get_by_role("button", name="保存修改", exact=True).click()
+                assert saved_file.value.status == 200
+                expect(page.get_by_role("dialog")).not_to_be_visible(timeout=15000)
                 expect(page.locator(".file-section").nth(1)).to_contain_text("新名称.txt")
                 checks.append("项目、阶段、区域编辑及文件重命名和移动")
 
