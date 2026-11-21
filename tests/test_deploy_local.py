@@ -17,6 +17,7 @@ class LocalDeployTests(unittest.TestCase):
         script=Path(__file__).resolve().parents[1]/'scripts/deploy_local.py'
         spec=importlib.util.spec_from_file_location('modus_deploy_test',script)
         self.module=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.module)
+        self.actual_manifest=list(self.module.FILES)
         self.module.ROOT=self.runtime;self.module.BASE=self.source
         self.module.FILES=['server.py','static/app.js']
         for name in self.module.FILES:
@@ -38,8 +39,19 @@ class LocalDeployTests(unittest.TestCase):
             self.assertEqual(before,(self.runtime/'data/modus.sqlite3').read_bytes())
 
     def test_manifest_cannot_overwrite_private_runtime_data(self):
-        self.module.FILES=['data/modus.sqlite3']
-        with self.assertRaises(RuntimeError):self.module.verify()
+        for name in ['data/modus.sqlite3','.git/config','static/data/private.txt','scripts/unreviewed.py','../escape.py','connection.json','codex-skill/connection.json','bootstrap.json']:
+            with self.subTest(path=name):
+                self.module.FILES=[name]
+                with self.assertRaisesRegex(RuntimeError,'Unsafe deployment file'):self.module.verify()
+
+    def test_actual_application_manifest_includes_nested_codex_scripts(self):
+        self.module.FILES=self.actual_manifest
+        for name in self.actual_manifest:
+            target=self.source/name;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(b'# reviewed application fixture\n')
+        hashes=self.module.verify()
+        self.assertEqual(len(hashes),len(self.actual_manifest))
+        self.assertIn('codex-skill/scripts/modus.py',hashes)
 
     def test_an_unverified_revision_does_not_copy_source(self):
         with patch.dict('os.environ',{'MODUS_DEPLOY_REVISION':'a'*40}),patch.object(self.module.subprocess,'run',return_value=SimpleNamespace(stdout='b'*40)):

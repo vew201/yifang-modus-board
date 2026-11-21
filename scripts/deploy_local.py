@@ -30,7 +30,7 @@ def verify():
     manifest={}
     for name in FILES:
         relative=Path(name)
-        if relative.is_absolute() or '..' in relative.parts or set(relative.parts)&{'data','.git','.github','scripts','tests','work','outputs'} or relative.name in {'connection.json','bootstrap.json'}:raise RuntimeError('Unsafe deployment file')
+        if not relative.parts or relative.drive or relative.is_absolute() or '..' in relative.parts or set(relative.parts)&{'data','.git','.github','tests','work','outputs'} or relative.parts[0]=='scripts' or relative.name in {'connection.json','bootstrap.json'}:raise RuntimeError('Unsafe deployment file')
         path=(BASE/name).resolve()
         if not path.is_relative_to(BASE) or not path.is_file():raise RuntimeError('Deployment source is missing')
         if path.suffix=='.py':ast.parse(path.read_text(encoding='utf-8'))
