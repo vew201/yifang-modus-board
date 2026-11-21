@@ -36,5 +36,5 @@ jobs:
         run: python scripts/pr_gate.py --pr $env:PR_NUMBER
       - name: Record deployment handoff
         run: >-
-          'Merged ${{ steps.gate.outputs.merge_sha }}. Production deployment must verify this merged revision and the local runner connection; a green merge job alone does not mean production was updated.'
+          'Merged ${{ steps.gate.outputs.merge_sha }}. The connected local deployment controller will verify this exact merged revision. A green merge job alone does not mean production was updated.'
           >> $env:GITHUB_STEP_SUMMARY
