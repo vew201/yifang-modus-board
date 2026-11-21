@@ -1,0 +1,40 @@
+name: Reviewed PR merge
+on:
+  issue_comment:
+    types: [created]
+permissions:
+  contents: read
+concurrency:
+  group: reviewed-main-merge
+  cancel-in-progress: false
+jobs:
+  merge:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/modus merge' &&
+      contains(fromJSON('["vew201","XinboChen-Jason"]'), github.actor)
+    runs-on: windows-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Verify current review and tests, then merge the exact head
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: python scripts/pr_gate.py --pr $env:PR_NUMBER
+      - name: Record deployment handoff
+        run: >-
+          'Merged ${{ steps.gate.outputs.merge_sha }}. Production deployment must verify this merged revision and the local runner connection; a green merge job alone does not mean production was updated.'
+          >> $env:GITHUB_STEP_SUMMARY

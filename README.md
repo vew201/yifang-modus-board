@@ -7,6 +7,7 @@
 需要 Python 3.12，浏览器测试使用 Microsoft Edge。
 
 ```powershell
+python scripts/fetch_assets.py
 python server.py --port 8875 --data-dir .local/dev-data
 ```
 
@@ -18,6 +19,8 @@ python tests/run_all.py --browser --output .artifacts/tests
 ```
 
 测试全部使用隔离数据库。无 Edge 的环境先只运行 `python -m unittest discover -s tests -v`。
+
+中文字体为较大的第三方依赖，通过 `asset-manifest.json` 固定官方源码提交、文件大小和 SHA-256；上面的准备命令下载后验证，字体授权已包含在仓库。已有部署电脑上的同一字体会复用。
 
 ## 协作流程
 

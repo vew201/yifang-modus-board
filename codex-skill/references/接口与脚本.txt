@@ -1,0 +1,128 @@
+易方 MODUS 后端接口与归档脚本
+
+接入兼容规则：每条用户消息先确认本轮版本检查。已有本轮Hook回执可复用；缺少回执时由AI先运行稳定入口launcher.py check。Hook已信任不代表已经自动执行，模拟测试不算自动触发证据。首次或更新后读取当前rules所指说明并ack当前会话版本。未变化只做轻量查询，不重复下载规则，不使用定时任务；人类正常对话即可。
+
+一、连接
+安装后的稳定入口位于技能目录 scripts/modus.py，或客户端目录 launcher.py，只需要Python3.10或以上。本说明中的示例均指稳定入口，不能直接运行releases版本目录内的内部脚本。
+连接已有看板账号时运行下列命令，密码通过终端交互输入。
+python scripts/modus.py connect --url http://127.0.0.1:8765 --username 你的账号
+默认在技能目录保存 connection.json。也可通过 --config 文件路径或 MODUS_CONFIG 指定配置。
+连接配置包含凭证，应在自己的电脑保存。分享给合伙人的包只包含脚本、技能和说明。
+
+二、先查询
+python scripts/modus.py status
+python scripts/modus.py state
+status 返回接入账号，state 返回用户编号、项目、意向、任务、阶段、区域、文件、沟通和回收站。
+创建或维护对象前，使用真实编号。负责人采用用户编号。读取到的 revision 用于编辑和删除的版本校验。
+
+三、提交
+把操作写进 UTF-8 JSON 文件，然后运行以下命令。
+python scripts/modus.py submit 提交文件.json
+文件格式如下。
+{
+  "request_id": "为这一次提交生成的固定唯一编号",
+  "operations": [
+    {
+      "method": "POST",
+      "path": "/api/opportunities",
+      "data": {
+        "name": "示例合作意向",
+        "company": "已知公司名或留空",
+        "contact": "已知联系人或留空",
+        "description": "已确认信息与待确认问题",
+        "next_step": "用户已说明的下一步安排",
+        "owner_id": 1,
+        "color": "#4A789B"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/conversations",
+      "data": {
+        "opportunity_id": {"$ref": "0.id"},
+        "owner_id": 1,
+        "text": "本次相关对谈原文",
+        "summary": "沟通摘要",
+        "occurred_at": "2026-11-18T14:00:00+08:00",
+        "client_key": "本次沟通固定唯一编号"
+      }
+    }
+  ]
+}
+以上编号仅作结构示例，实际需要查询。
+$ref 的 0 表示第一个操作的结果。每次可提交 1—30 个操作。同一批次统一提交，失败时回滚。
+request_id 在网络重试时保持相同，同一编号搭配不同内容会返回 409。
+
+四、支持的资源
+/api/projects 项目，新增需要 name、owner_id、start_date、end_date，color 可从调色板选择。
+/api/opportunities 合作意向，新增需要 name、owner_id，其他字段按实际情况填入。
+/api/tasks 任务，新增需要 title、owner_id，日期可同时为空；kind 为 daily 或 long。
+任务可设置 project_id 或 opportunity_id，最多选择其中一个。具体时刻放在 time，格式为 HH:MM。
+项目待办可用 stage_id 关联同一 project_id 的阶段，也可为空。关联只供分类，不影响阶段或项目完成。
+项目固定八阶段：项目准备、资料接收、需求澄清、方案与开工对齐、开发实现、整体验证、交付验收、复盘改进。新建项目自动建立，阶段日期可待定。不能POST新增、DELETE删除、改名、改顺序或跨项目移动阶段。
+/api/stages/编号 使用PATCH记录进展，work_summary 为工作内容，status 为 pending、in_progress、completed、not_applicable，completion_note 为完成或不适用说明，completed_at 为实际完成时间。completed、not_applicable要求说明，实际完成时间不能晚于现在；提交当前 revision，旧记录保存于 stage_history。
+任务新增、勾选、撤回、回收和恢复不会改变阶段状态。阶段状态改变也不会改变任务完成状态。
+项目开发完成用 PATCH /api/projects/编号，development_done=true、completion_note（必填）、development_completed_at（真实时间，可在当前完成时省略采用现在）、revision。取消开发完成用 development_done=false；不能直接改completed_at。明确开发完成后才产生project_archives归档，保持尾款单独登记。
+/api/sections 文件区域，需要 project_id、name。编辑可修改 name、position。
+/api/documents 文件，上传需要 section_id、owner_id、file_path。脚本读取文件并转换为上传内容，单份上限 20 MB。
+编辑文件可修改 name、owner_id、section_id，从而调整名称、负责人和所在区域。
+/api/conversations 沟通记录，需要 owner_id、text，并关联 project_id、opportunity_id 或 task_id。summary 存放摘要。
+
+新增使用 POST /api/资源名。编辑使用 PATCH /api/资源名/编号，并携带 revision。
+完成任务使用 PATCH /api/tasks/编号，data 包含 done=true 和当前 revision。任务负责人执行。
+删除使用 DELETE /api/资源名/编号，data 包含 revision，记录进入回收站。
+恢复使用 POST /api/restore/资源名/编号。恢复子对象后，所属项目或区域也需处于正常状态。
+项目修改周期时，需要覆盖现有阶段。阶段的日期需位于项目周期内。
+文件区域有文件时，先通过文件编辑接口移动资料，再回收空区域。
+
+五、直接调用
+python scripts/modus.py request GET /api/agent/me
+python scripts/modus.py request PATCH /api/tasks/具体编号 --json-file 修改文件.json
+需要可靠重试的写入优先采用 submit 批量入口。
+401 表示接入失效，400 表示信息需修正，409 表示数据冲突或提交编号冲突。
+本机公网共享的临时网址变化时，可以运行 python scripts/modus.py set-url 新的HTTPS地址，保留自己的现有凭证。
+GET /api/network 在登录后返回当前公网共享状态及最新地址。本机的 Codex 可继续使用本机地址。
+凭证通过 Authorization Bearer 传递。凭证权限对应绑定的看板账号。
+调色板可用 #7864A5、#4A789B、#56836D、#B85E57、#AB7A3C、#5C8587、#97617D、#6C738D。
+
+六、三阶段意向接口（2026-11-20）
+POST /api/opportunities 初始 phase=lead。结构化字段 channel、source_url（http/https）、company_details、service_type、post_text，description 为我的总结。
+POST /api/opportunity_files 上传意向文件，opportunity_id、owner_id、name、file_path，role 为 image、recording、attachment、solution、quote。图片支持 PNG/JPEG/GIF/WebP。version 保存版本说明。conversation_id 可选且必须属于同意向。
+GET /api/opportunity_files/编号 读取原始文件，图片按真实文件类型显示。可通过下方 download 命令下载到本机。文件可 DELETE 回收、POST /api/restore/opportunity_files/编号 恢复；当前选用的最终文件需先替换才允许回收。
+POST /api/conversations 关联 opportunity_id 时支持 occurred_at、participants、requirements、open_questions、decisions、next_action、agreed_next_at、client_key。text 保存原文，summary 保存摘要。日期时刻使用 ISO8601 +08:00，实际发生时间不能晚于现在。
+occurred_at 未知可为空，仅保存信息，不推进阶段或生成跟进；不能把 created_at 作为真实发生时间。填写真实时间后自动进入 communication。requirements 传入本次沟通整理后的完整需求，非零散增量。
+相同 client_key + 相同内容重试返回原记录，相同编号不同内容返回409。修订用 PATCH /api/conversations/编号，加 revision；保持一次沟通，旧版本保存 conversation_history。不要为了重试生成新 client_key 或 request_id。
+PATCH /api/opportunities/编号 进入 phase=proposal，必须 requirements、submitted_at、solution_file_id、quote_file_id。先上传 solution、quote 两份文件，编号必须属于本意向，feedback_at 存客户约定反馈时间，submission_recipient 为对象和方式。
+无需单独创建下次联系任务，后端统一维护一个 auto_followup=1 的当前待办。沟通默认结束+24小时，方案已提交阶段默认提交/本次跟进结束+48小时，约定优先。owner_id 对应意向负责人，时区中国标准时间，按自然小时计算。
+新沟通不会自动勾选已完成；负责人勾选第三阶段跟进任务时默认从完成时刻+48小时创建下一项，随后上传新沟通可调整为真实结束时间或新约定。已完成记录不覆盖。普通行动任务仍另行创建。
+POST /api/opportunities/编号/convert 可传 project_id 关联既有项目；留空创建同名项目及固定八阶段。写入 outcome=converted、linked_project_id，停止自动售前跟进。
+POST /api/opportunities/编号/fail 仅第三阶段进行中意向可操作，必须 failure_reason，写入 outcome=failed 和 closed_at，停止自动跟进。
+POST /api/opportunities/编号/reopen 恢复跟进，可传 agreed_next_at，没有约定从恢复时+48小时。
+上述转换携带当前 revision，避免覆盖同伴操作；不允许直接 PATCH outcome。
+PATCH /api/projects/编号 登记 final_payment_at（真实尾款到账时间）和 payment_note。清空 final_payment_at 可纠正误登记。成功页面条件为 completed_at 和 final_payment_at 同时存在，明确恢复开发或撤销到账登记后会退出成功页面。取消某条待办的完成不会触发恢复开发。
+state 新增 opportunity_files、conversation_history；任务增加 auto_followup、time_basis。cancelled_at 非空的自动跟进不会显示在首页，但保留数据库记录。
+
+下载命令示例：python scripts/modus.py download /api/opportunity_files/真实编号 本机新路径.pdf
+目标已存在时不会覆盖，可换一个新路径。下载后按文件实际内容整理，无法读取的格式注明待确认。
+
+七、八阶段分类、项目外待办、停留颜色
+项目文档POST/PATCH /api/documents 支持stage_id，必须属于文件区域对应的项目；留空不关联，auto按文件名给出明确分类，无法判断则留空。上传未传stage_id也按明确文件名归类。明确用途优先传真实stage_id。
+项目对谈 POST /api/conversations 可传stage_id关联同项目阶段；text保留原文，summary存结论。文件区域仍可按实际需求增减，与固定八阶段并存。
+项目外待办沿用 /api/tasks，project_id和opportunity_id均为空，stage_id也为空。负责人、时间、完成记录和普通任务一致，展示于第七页。归属不在项目外的任务不会混入该页。
+state.opportunities带last_activity_at、age_band（white/gray/black）、idle_days、activity_note。72和144自然小时为变色边界，后端由实际写入行为自动维护，读接口不写活动时间；不要PATCH这些计算或维护字段。
+历史记录没有可靠修改时间时，以升级时刻作为计时起点，并通过activity_note说明；已知创建或实际记录时间会保留。stage_history保存阶段历史修订；旧阶段原始信息保留在数据库project_model_migrations，不当成新阶段的实际完成依据。
+
+八、自动更新接入
+首次接入包通过工作台“Codex接入与更新”区域生成，绑定当前账号，激活有效期7天，Token不要求用户再手输。包里的bootstrap.py --workspace 当前专用目录 会完成安装，首次Hook信任需由用户在Codex中确认。
+安装后脚本入口为技能目录 scripts/modus.py 或 客户端目录/launcher.py。业务命令status、state、submit、request、download与原来一致，新增check（同步在线版本）、rules（当前业务技能路径）、ack --session 会话编号 --release 完整版本编号（已读确认）。
+UserPromptSubmit 每条新消息向 /api/codex/manifest 做一次小请求；304表示没有变化，不下载文件。相同消息的重复调用复用回执，其他专用目录外的会话不发网络请求。没有定时更新任务。
+GET /api/codex/info 提供当前接入版本、文件清单和已安装客户端信息；文件通过 /api/codex/files/校验值 下载。更新清单需通过连接验证密钥校验，文件按SHA256校验。只替换版本目录，保留连接凭证、原版本及会话标记。
+托管客户端写入携带 X-Modus-Release。后端返回428时表示版本过期，原操作没有执行；必须读取新规则、核对原提交再重试。当前会话尚未ack最新版时，脚本也会暂停写入。
+每个专用会话的轻量记录只保留当前消息校验结果及最后已读版本，不复制对话全文。SessionStart或上下文压缩后会提示重新读取当前有效规则。
+连接正常时直接请求已知地址；失效时从固定DuckDNS名称读取带验证信息的TXT记录，再连接新地址。账号Token不发送给DNS解析器，DuckDNS管理Token不下发给客户端。
+连接验证密钥用于两位受信任合伙人的私有接入分发，属于接入凭据，不能放进公开说明或共享给外部第三方。
+
+九、30天回收站与彻底清理
+GET /api/trash 返回retention_days=30、items（按表分类，含deleted_at、expires_at、deleted_by）和pending_files。DELETE /api/资源/编号仍仅移入回收站。POST /api/restore/资源/编号恢复并清除删除时间；子记录的所属项目、意向或文件区域在回收站时，先恢复父记录。
+POST /api/trash/preview 传 {"table":"projects","id":真实编号}，或 {"all":true}。返回roots、counts、labels、file_count、file_bytes、retained_links、shared_files_preserved、preview_token。先向用户展示真实范围，确认后单独POST /api/trash/purge，传相同选择字段及preview_token、confirm:true。必须是当前账号预览，5分钟内有效；记录或关联发生变化返回409，不能盲目重试，需重新预览确认。永久删除不能放入/api/agent/submit事务批次。沿用稳定入口request命令调用，写入前仍先核对版本及当前会话已读状态。
+清理结果返回counts、files_removed、pending_files；pending_files非零表示已提交记录删除，但部分磁盘文件仍待后台重试。只在确认原件移除后报告已释放附件空间；数据库删除后的空闲页会复用，不承诺数据库文件立刻变小。成功/失败项目及工作归档只有所属记录被明确移入回收站后才纳入对应父记录清理，正常归档不自动过期。
